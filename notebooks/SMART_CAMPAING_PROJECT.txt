@@ -1,1 +1,4 @@
-This notebook folder belongs to SmartCampaing project.
+This notebook folder belongs to SmartCampaign project.
+
+This is remote folder!
+

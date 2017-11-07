@@ -370,6 +370,7 @@ class SmartCampaignBase:
             'equity_mm': equity_mm.loc[sdate:],
             'equity_plain_adj': equity_plain_adj.loc[sdate:],
             'equity_plain_adj_noreinv': equity_plain_adj_noreinv.loc[sdate:],
+            'equity_simple_sum': self.equities.sum(axis=1),
             'campaign_estimated_base_risk': campaign_risk_series.loc[sdate:],
             'campaign_estimated_base_risk_plain': campaign_plain_risk_series.loc[sdate:],
             'campaign_alphas_size': campaign_alphas_size.loc[sdate:],
@@ -418,6 +419,8 @@ class SmartCampaignBase:
         bt_stats_dict['equity_mm'].plot(label='Eqty MM');
         bt_stats_dict['equity_plain_adj'].plot(label='Eqty Adj Plain');
         bt_stats_dict['equity_plain_adj_noreinv'].plot(label='Eqty Adj No Reinv');
+        bt_stats_dict['equity_simple_sum'].plot(label='Eqty Simple Sum');
+
         plt.legend(loc=2);
         plt.title("Equities");
 
@@ -454,15 +457,6 @@ class SmartCampaignBase:
         bt_stats_dict['campaign_estimated_base_risk_plain'].plot(label='Risk Plain');
         plt.legend(loc=2);
         plt.title("Campaign estimated base risk");
-
-
-
-
-
-
-
-
-
 
 
     @property
