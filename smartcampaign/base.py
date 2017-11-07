@@ -370,7 +370,7 @@ class SmartCampaignBase:
             'equity_mm': equity_mm.loc[sdate:],
             'equity_plain_adj': equity_plain_adj.loc[sdate:],
             'equity_plain_adj_noreinv': equity_plain_adj_noreinv.loc[sdate:],
-            'equity_simple_sum': self.equities.sum(axis=1),
+            'equity_simple_sum': self.equities.ffill().sum(axis=1),
             'campaign_estimated_base_risk': campaign_risk_series.loc[sdate:],
             'campaign_estimated_base_risk_plain': campaign_plain_risk_series.loc[sdate:],
             'campaign_alphas_size': campaign_alphas_size.loc[sdate:],
