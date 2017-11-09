@@ -385,30 +385,72 @@ class SmartCampaignBase:
         :return:
         """
         initial_capital = bt_stats_dict['initial_capital']
-        target_risk_percent = bt_stats_dict['target_risk_percent']
 
-        eq = bt_stats_dict['equity_mm'].ffill()
-        netprofit = eq[-1]
-        atr_series = atr_nonull(eq, eq, eq, self._cmp_dict['campaign_risk_period'])
+        def calc_stats(eq):
+            mm_eq = eq.ffill()
+            mm_netprofit = mm_eq[-1]
+            mm_atr_series = atr_nonull(mm_eq, mm_eq, mm_eq, self._cmp_dict['campaign_risk_period'])
+            mm_max_dd_series = mm_eq - mm_eq.expanding().max()
 
-        max_dd_series = eq - eq.expanding().max()
+            return {
+                'net_profit_usd': mm_netprofit - initial_capital,
+                'net_profit_pct': (mm_netprofit - initial_capital) / initial_capital * 100,
 
-        print("{0:<30}{1:>10.2f}".format("NetProfit $", netprofit - initial_capital))
-        print("{0:<30}{1:>10.2f}%".format("NetProfit %", (netprofit - initial_capital) / initial_capital * 100))
+                'mdd_usd': mm_max_dd_series.min(),
+                'mdd_pct': (mm_max_dd_series / mm_eq.expanding().max()).min() * 100,
+
+                'atr_max_usd': mm_atr_series.max(),
+                'atr_q95_usd': mm_atr_series.dropna().quantile(0.95),
+                'atr_avg_usd': mm_atr_series.mean(),
+
+                'atr_max_pct': (mm_atr_series/mm_eq).max()*100,
+                'atr_q95_pct': (mm_atr_series/mm_eq).dropna().quantile(0.95)*100,
+                'atr_avg_pct': (mm_atr_series/mm_eq).mean()*100,
+            }
+
+        def print_multi(field_name, key, dict_list, _format="{0:>10}"):
+            pattern = "{0:<30}"
+            values = []
+            for i, d in enumerate(dict_list):
+                pattern += _format.replace("0:", "{0}:".format(i+1))
+
+                if key is None:
+                    values.append(d)
+                else:
+                    values.append(d[key])
+
+            print(pattern.format(field_name, *values))
+
+        mm_stats = calc_stats(bt_stats_dict['equity_mm'])
+        plain_adj_stats = calc_stats(bt_stats_dict['equity_plain_adj'])
+        plain_adj_noreinv = calc_stats(bt_stats_dict['equity_plain_adj_noreinv'])
+        simple_sum = calc_stats(bt_stats_dict['equity_simple_sum'])
+
+        eq_list = [mm_stats, plain_adj_stats, plain_adj_noreinv, simple_sum]
+
+        print_multi('', None, ['   MM', '   Adj Plain', "   Adj No Reinv", "   Simple Sum"], _format="{0:<15}")
+
+        fmt_float = '{0:>15.2f}'
+        fmt_float_pct = '{0:>14.2f}%'
+        print_multi("NetProfit $", 'net_profit_usd', eq_list, _format=fmt_float)
+        print_multi("NetProfit %", 'net_profit_pct', eq_list, _format=fmt_float_pct)
         print('') # Line break
 
-        print("{0:<30}{1:>10.2f}".format("MaxDD $", max_dd_series.min()))
-        print("{0:<30}{1:>10.2f}%".format("MaxDD %", (max_dd_series / eq).min() * 100))
+        print_multi("MaxDD $", 'mdd_usd', eq_list, _format=fmt_float)
+        print_multi("MaxDD %", 'mdd_pct', eq_list, _format=fmt_float_pct)
         print('')  # Line break
 
-        print("{0:<30}{1:>10.2f}".format("MaxATR $", atr_series.max()))
-        print("{0:<30}{1:>10.2f}".format("Q95% ATR $", atr_series.dropna().quantile(0.95)))
-        print("{0:<30}{1:>10.2f}".format("Avg ATR $", atr_series.mean()))
+        print_multi("MaxATR $",   'atr_max_usd', eq_list, _format=fmt_float)
+        print_multi("Q95% ATR $", 'atr_q95_usd', eq_list, _format=fmt_float)
+        print_multi("Avg ATR $",  'atr_avg_usd', eq_list, _format=fmt_float)
         print('')  # Line break
 
-        print("{0:<30}{1:>10.2f}%".format("MaxATR %", (atr_series/eq).max()*100))
-        print("{0:<30}{1:>10.2f}%".format("Q95% ATR %", (atr_series/eq).dropna().quantile(0.95)*100))
-        print("{0:<30}{1:>10.2f}%".format("Avg ATR %", (atr_series/eq).mean()*100))
+        print_multi("MaxATR %",   'atr_max_pct', eq_list, _format=fmt_float_pct)
+        print_multi("Q95% ATR %", 'atr_q95_pct', eq_list, _format=fmt_float_pct)
+        print_multi("Avg ATR %",  'atr_avg_pct', eq_list, _format=fmt_float_pct)
+        print('')  # Line break
+
+
 
         #
         # Plotting
