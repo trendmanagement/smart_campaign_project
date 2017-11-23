@@ -11,15 +11,32 @@ from scripts.settings import *
 storage = EXOStorage(MONGO_CONNSTR, MONGO_EXO_DB)
 
 CAMPAIGN_DICT = {
-    'name': "SmartCampaignDebug",
+    'name': "BasicSmartCampaign",
+
+    # Allowed values for both ALPHA_RISK_TYPE and CAMPAIGN_RISK_TYPE
+
+    # 'atr' - ATR(RISK_PERIOD) of alpha/campaign equity risk metric
+    # 'atrmax' - Highest(ATR(RISK_PERIOD)) of alpha/campaign equity risk metric
+    # 'ddavg' - rolling mean (RISK_PERIOD) of drawdown of alpha/campaign equity
+    # 'ddmax' - rolling maximum (RISK_PERIOD) of drawdown of alpha/campaign equity
+    # 'ddq95' - rolling 95% quantile (RISK_PERIOD) of drawdown of alpha/campaign equity
     'alpha_risk_type': 'atr',
     'alpha_risk_period': 100,
+    'alpha_min_risk': 100,
 
-    'campaign_risk_type': 'ddmax',
+    'campaign_risk_type': 'atrmax',
     'campaign_risk_period': 100,
+    'campaign_min_risk': 100,
 
+    #
+    # Campaign definition
+    #
     'alphas': {
-        '!NEW_AlphaV1Exposure_HedgedBy_V2_US_ZN_EXO_PutSpread_DynKel_longs_DSP_BandPass__Bullish_2_Sept_7_21': {'tag': ''},
+        # Single alphas
+        '!NEW_AlphaV1Exposure_HedgedBy_V2_US_ZN_EXO_PutSpread_DynKel_longs_DSP_BandPass__Bullish_2_Sept_7_21': {
+            'tag': ''},
+
+        # !! Risk reversal stack V1 + V2
         'ZN_ContFut_Long_Strategy_DSP_BandPass__Bullish_2_Sept_7__hedged': {
             'tag': '',
             'alphas': {
@@ -50,7 +67,7 @@ if set(cached_cols) != set(alphas_list):
 #
 scmp = SmartCampaignBase(CAMPAIGN_DICT, df_alphas_equities)
 
-scmp.backtest()
+bt_dict = scmp.backtest()
 
 pass
 

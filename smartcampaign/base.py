@@ -2,8 +2,46 @@ import pandas as pd
 import numpy as np
 from smartcampaign.tools import risk_atr, risk_atrmax, risk_ddavg, risk_ddq95, risk_ddmax, atr_nonull
 import math
-import matplotlib.pyplot as plt
 
+
+from pydoc import locate
+import pickle
+import lz4
+
+
+def object_to_full_path(obj) -> str:
+    """
+    Converts object instance to full-qualified path like 'package.module.ClassName'
+    :param obj: any object class
+    :return:
+    """
+    module_name = obj.__module__
+
+    if module_name == '__main__':
+        raise RuntimeError("Serialization of objects from '__main__' namespace is not allowed, if you are using "
+                           "Jupyter/IPython session try to save class object to separate module.")
+
+    try:
+        # In case when the object is Class (i.e. type itself)
+        return "{0}.{1}".format(module_name, obj.__qualname__)
+    except AttributeError:
+        # The case when the object is class instance
+        return "{0}.{1}".format(module_name, obj.__class__.__name__)
+
+
+def object_from_path(obj_path):
+    """
+    Loads object class from full-qualified path like 'package.module.ClassName'
+    :param obj_path: full-qualified path like 'package.module.ClassName'
+    :return:
+    """
+    obj = locate(obj_path)
+
+    if obj is None:
+        raise ValueError("Failed to load object from {0}. Try to check that object path is valid ".format(obj_path) +
+                         "and package path in the $PYTHONPATH environment variable")
+
+    return obj
 
 class SmartCampaignBase:
     def __init__(self, campaign_dict, campaign_dataframe):
@@ -285,6 +323,8 @@ class SmartCampaignBase:
         campaign_plain_risk_series = pd.Series(float('nan'), index=self.equities.index, dtype=np.float64)
 
         campaign_alphas_size = pd.DataFrame(0, index=self.equities.index, columns=self.equities.columns, dtype=np.float64)
+        campaign_alphas_size_raw = pd.DataFrame(0, index=self.equities.index, columns=self.equities.columns,
+                                            dtype=np.float64)
         alphas_eq_plain = pd.DataFrame(0, index=self.equities.index, columns=self.equities.columns, dtype=np.float64)
         alphas_eq_mm = pd.DataFrame(0, index=self.equities.index, columns=self.equities.columns, dtype=np.float64)
 
@@ -323,6 +363,7 @@ class SmartCampaignBase:
                 campaign_risk_series[i] = cmp_risk
                 campaign_plain_risk_series[i] = plain_cmp_risk
                 campaign_alphas_size.loc[dt] = cmp_total_weights
+                campaign_alphas_size_raw.loc[dt] = cmp_total_weights_raw
 
                 # calculate individual alpha equities
                 alphas_eq_mm.iloc[i] = alphas_eq_mm.iloc[i-1] + base_diff_at_dt * cmp_total_weights
@@ -353,6 +394,7 @@ class SmartCampaignBase:
 
                 # Do alpha weights rounding and total campaign size adjustments
                 cmp_total_weights = (alpha_adj_weights * alpha_cmp_weights * cmp_size).round()
+                cmp_total_weights_raw = (alpha_adj_weights * alpha_cmp_weights)
                 plain_cmp_total_weights = (plain_alpha_adj_weights * plain_cmp_size).round()
                 plain_noreinv_cmp_total_weights = (plain_alpha_adj_weights * noreinv_cmp_size).round()
 
@@ -374,6 +416,7 @@ class SmartCampaignBase:
             'campaign_estimated_base_risk': campaign_risk_series.loc[sdate:],
             'campaign_estimated_base_risk_plain': campaign_plain_risk_series.loc[sdate:],
             'campaign_alphas_size': campaign_alphas_size.loc[sdate:],
+            'campaign_alphas_size_raw': campaign_alphas_size_raw.loc[sdate:],
             'alphas_equity_plain': alphas_eq_plain.loc[sdate:],
             'alphas_equity_mm': alphas_eq_mm.loc[sdate:],
         }
@@ -384,6 +427,9 @@ class SmartCampaignBase:
         :param bt_stats_dict:
         :return:
         """
+
+        import matplotlib.pyplot as plt
+
         initial_capital = bt_stats_dict['initial_capital']
 
         def calc_stats(eq):
@@ -492,6 +538,15 @@ class SmartCampaignBase:
 
         plt.title('Alpha size', y=0.95);
 
+        # Alphas sizes RAW
+        plt.figure();
+        bt_stats_dict['campaign_alphas_size_raw'].plot().legend(bbox_to_anchor=(0, 1.02, 1, 0.2),
+                                                            loc="lower left",
+                                                            mode="expand",
+                                                            borderaxespad=0, ncol=1);
+
+        plt.title('Raw alphas size (without rounding and account risk adj)', y=0.95);
+
 
         # Campaign estimated base risk
         plt.figure();
@@ -500,6 +555,53 @@ class SmartCampaignBase:
         plt.legend(loc=2);
         plt.title("Campaign estimated base risk");
 
+    def save(self, mongo_collection):
+        self._cmp_dict['class'] = object_to_full_path(self)
+
+        # Dumping Smartcampaign settings to the collection
+        db_collection = mongo_collection
+        db_collection.replace_one({'name': self.name}, self._cmp_dict, upsert=True)
+
+    @staticmethod
+    def load_from_v1(smart_campaign_name, exo_storage, mongo_collection):
+        db_collection = mongo_collection
+        smart_dict = db_collection.find_one({'name': smart_campaign_name})
+
+        if smart_dict is None:
+            raise KeyError("SmartCampaign {0} is not found in the MongoDB".format(smart_campaign_name))
+
+        SmartCampaignClass = object_from_path(smart_dict['class'])
+
+        # Loading V1 and V2 alphas
+        alphas_list = SmartCampaignBase.get_alphas_list_from_settings(smart_dict)
+        alphas_series_dict = exo_storage.swarms_data(alphas_list, load_v2_alphas=True)
+        df_alphas_equities = pd.DataFrame({k: v['swarm_series']['equity'] for k, v in alphas_series_dict.items()})
+
+        return SmartCampaignClass(smart_dict, df_alphas_equities)
+
+    def export_to_v1_campaign(self):
+        """
+        Exports to v1 campaign settings
+        :return:
+        """
+
+        alpha_adj_weights, alpha_cmp_weights, cmp_risk = self.calculate(date=None)
+
+        alpha_total_weights = alpha_adj_weights * alpha_cmp_weights
+
+        campaign_dict = {
+            'name': self.name,
+            'description': self.description,
+            'type': 'smart',
+            'alphas': {k: {'qty': v} for k, v in alpha_total_weights.items()},
+            'campaign_risk': cmp_risk,
+        }
+
+        return campaign_dict
+
+    @property
+    def description(self):
+        return self._cmp_dict.get('description', '')
 
     @property
     def name(self):
