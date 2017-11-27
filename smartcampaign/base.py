@@ -2,8 +2,9 @@ import pandas as pd
 import numpy as np
 from smartcampaign.tools import risk_atr, risk_atrmax, risk_ddavg, risk_ddq95, risk_ddmax, atr_nonull
 import math
-
-
+import re
+import warnings
+import matplotlib.pyplot as plt
 from pydoc import locate
 import pickle
 import lz4
@@ -44,17 +45,24 @@ def object_from_path(obj_path):
     return obj
 
 class SmartCampaignBase:
-    def __init__(self, campaign_dict, campaign_dataframe):
+    def __init__(self, campaign_dict, campaign_data_dict, default_commission_per_contr=3.0):
         """
         Initialize base SmartCampaing class
         :param campaign_dict: setting dictionary for Smart Campaign
-        :param campaign_dataframe: pandas.DataFrame for alpha equities
+        :param campaign_data_dict: pandas.DataFrame for alpha equities
+        :param default_commission_per_contr: USD commission per contract for trades count estimation
         """
         self._cmp_dict = campaign_dict
-        self._cmp_dataframe = campaign_dataframe
+        self._cmp_data_dict = campaign_data_dict
+
+        self.default_commission_per_contr = default_commission_per_contr
+
+        # Get products from alphas list
+        self.alphas_products = self.get_alphas_product_dict()
 
         # Convert stacked alphas to single equity series
-        self.equities, self.tags = self._init_dataframes()
+        self.equities, self.costs, self.exposures, self.deltas, self.ncontracts, self.tags = self._init_dataframes()
+
 
     @staticmethod
     def get_alphas_list_from_settings(campaing_dict):
@@ -71,25 +79,74 @@ class SmartCampaignBase:
 
         return alphas
 
+    def get_alphas_product_dict(self):
+        alphas = {}
+
+        def _get_product_by_name(alpha_name, product_def='N/A'):
+            if alpha_name.startswith("!NEW_"):
+                re_match = re.findall(r"_US_(?P<product>[a-zA-Z]*)_", alpha_name)
+                if not re_match:
+                    if product_def == 'N/A':
+                        warnings.warn("Failed to get product from alpha name: {0}".format(alpha_name))
+                    product = product_def
+                else:
+                    product = re_match[0]
+            else:
+                product = alpha_name.split('_')[0]
+
+            return product
+
+        for alpha_name, alpha_settings in self._cmp_dict['alphas'].items():
+            if 'alphas' not in alpha_settings:
+                # Seems to be single alpha
+                alphas[alpha_name] = _get_product_by_name(alpha_name,
+                                                          product_def=alpha_settings.get('product', 'N/A'))
+            else:
+                # Stacked alpha
+                products = set()
+                for stacked_alpha in alpha_settings['alphas'].keys():
+                    products.add(_get_product_by_name(stacked_alpha,
+                                                      product_def=alpha_settings.get('product', 'N/A')))
+                if len(products) != 1:
+                    raise ValueError("Stacked alpha contains different products! {0}".format(alpha_name))
+
+                alphas[alpha_name] = products.pop()
+
+        return alphas
+
     def _init_dataframes(self):
-        alphas_df_data = {}
+        alphas_equity_data = {}
+        alphas_costs_data = {}
+        alphas_exposure_data = {}
+        alphas_delta_data = {}
+        alphas_ncontracts_data = {}
+
         alphas_tags = {}
 
         for alpha_name, alpha_settings in self._cmp_dict['alphas'].items():
             tags = alphas_tags.setdefault(alpha_settings.get('tag', ''), [])
             tags.append(alpha_name)
 
-            if alpha_name in self._cmp_dataframe:
+            if alpha_name in self._cmp_data_dict:
                 # Seems to be non-stacked alpha
                 if 'alphas' in alpha_settings:
                     # Oops, we have stacked alpha, but all stacked alphas must have unique names
                     raise KeyError("Alpha name of stacked alpha ({0}) duplicated with single alpha. "
                                    "Make sure that stacked alpha name in unique and doesn't exist in _cmp_dataframe".format(alpha_name))
 
-                alphas_df_data[alpha_name] = self._cmp_dataframe[alpha_name]
+                alphas_equity_data[alpha_name] = self._cmp_data_dict[alpha_name]['equity']
+                alphas_costs_data[alpha_name] = self._cmp_data_dict[alpha_name]['costs']
+                alphas_exposure_data[alpha_name] = self._cmp_data_dict[alpha_name]['exposure']
+                alphas_delta_data[alpha_name] = self._cmp_data_dict[alpha_name]['delta']
+                alphas_ncontracts_data[alpha_name] = self._cmp_data_dict[alpha_name]['costs'].abs() / self.default_commission_per_contr
+
             elif 'alphas' in alpha_settings:
                 # Stacked alpha
-                series = None
+                equity_series = None
+                costs_series = None
+                exposure_series = None
+                delta_series = None
+                ncontracts_series = None
                 for stacked_alpha_name, stacked_alpha_qty in alpha_settings['alphas'].items():
 
                     if stacked_alpha_name in self._cmp_dict['alphas']:
@@ -103,23 +160,40 @@ class SmartCampaignBase:
                             type(stacked_alpha_qty)
                         ))
 
-                    if stacked_alpha_name not in self._cmp_dataframe:
+                    if stacked_alpha_name not in self._cmp_data_dict:
                         raise KeyError("Alpha {0} is not found in _cmp_dataframe".format(stacked_alpha_name))
                     if stacked_alpha_qty <= 0:
                         raise ValueError("Qty of stacked alpha leg <= 0. Stacked alpha: {0}".format(alpha_name))
 
-                    if series is None:
-                        series = self._cmp_dataframe[stacked_alpha_name] * stacked_alpha_qty
+                    if equity_series is None:
+                        equity_series = self._cmp_data_dict[stacked_alpha_name]['equity'] * stacked_alpha_qty
+
+                        costs_series = self._cmp_data_dict[stacked_alpha_name]['costs'] * stacked_alpha_qty
+                        exposure_series = self._cmp_data_dict[stacked_alpha_name]['exposure'] * stacked_alpha_qty
+                        delta_series = self._cmp_data_dict[stacked_alpha_name]['delta'] * stacked_alpha_qty
+                        ncontracts_series = self._cmp_data_dict[stacked_alpha_name]['costs'].abs() / self.default_commission_per_contr * stacked_alpha_qty
                     else:
-                        series += self._cmp_dataframe[stacked_alpha_name] * stacked_alpha_qty
+                        equity_series += self._cmp_data_dict[stacked_alpha_name]['equity'] * stacked_alpha_qty
+                        costs_series += self._cmp_data_dict[stacked_alpha_name]['costs'] * stacked_alpha_qty
+                        exposure_series += self._cmp_data_dict[stacked_alpha_name]['exposure'] * stacked_alpha_qty
+                        delta_series += self._cmp_data_dict[stacked_alpha_name]['delta'] * stacked_alpha_qty
+                        ncontracts_series += self._cmp_data_dict[stacked_alpha_name]['costs'].abs() / self.default_commission_per_contr * stacked_alpha_qty
+
+
 
                 # Final sanity checks
-                if series is None:
+                if equity_series is None:
                     raise ValueError("Stacked alpha is not initiated: {0}".format(alpha_name))
 
-                alphas_df_data[alpha_name] = series
+                alphas_equity_data[alpha_name] = equity_series
+                alphas_costs_data[alpha_name] = costs_series
+                alphas_exposure_data[alpha_name] = exposure_series
+                alphas_delta_data[alpha_name] = delta_series
+                alphas_ncontracts_data[alpha_name] = ncontracts_series
 
-        return pd.DataFrame(alphas_df_data), alphas_tags
+        return pd.DataFrame(alphas_equity_data), pd.DataFrame(alphas_costs_data), pd.DataFrame(alphas_exposure_data), \
+               pd.DataFrame(alphas_delta_data), pd.DataFrame(alphas_ncontracts_data), alphas_tags
+
 
     def calc_alpha_risk(self, alpha_equity):
         """
@@ -328,6 +402,10 @@ class SmartCampaignBase:
         alphas_eq_plain = pd.DataFrame(0, index=self.equities.index, columns=self.equities.columns, dtype=np.float64)
         alphas_eq_mm = pd.DataFrame(0, index=self.equities.index, columns=self.equities.columns, dtype=np.float64)
 
+        alphas_costs_mm = pd.DataFrame(0, index=self.equities.index, columns=self.equities.columns, dtype=np.float64)
+        alphas_delta_mm = pd.DataFrame(0, index=self.equities.index, columns=self.equities.columns, dtype=np.float64)
+        alphas_nexecuted_mm = pd.DataFrame(0, index=self.equities.index, columns=self.equities.columns, dtype=np.float64)
+
         # Main campaign settings
         alpha_adj_weights = None
         alpha_cmp_weights = None
@@ -368,6 +446,11 @@ class SmartCampaignBase:
                 # calculate individual alpha equities
                 alphas_eq_mm.iloc[i] = alphas_eq_mm.iloc[i-1] + base_diff_at_dt * cmp_total_weights
                 alphas_eq_plain.iloc[i] = alphas_eq_plain.iloc[i-1] + base_diff_at_dt * plain_cmp_total_weights
+
+                # Calculate deltas
+                alphas_costs_mm.iloc[i] = self.costs.iloc[i] * cmp_total_weights
+                alphas_delta_mm.iloc[i] = self.deltas.iloc[i] * cmp_total_weights
+                alphas_nexecuted_mm.iloc[i] = self.ncontracts.iloc[i] * cmp_total_weights
             else:
                 equity_mm[i] = equity_mm[i-1]
                 equity_plain_adj[i] = equity_plain_adj[i-1]
@@ -419,7 +502,141 @@ class SmartCampaignBase:
             'campaign_alphas_size_raw': campaign_alphas_size_raw.loc[sdate:],
             'alphas_equity_plain': alphas_eq_plain.loc[sdate:],
             'alphas_equity_mm': alphas_eq_mm.loc[sdate:],
+
+            'alphas_deltas_mm': alphas_delta_mm.loc[sdate:],
+            'alphas_costs_mm': alphas_costs_mm.loc[sdate:],
+            'alphas_contracts_mm': alphas_nexecuted_mm.loc[sdate:],
         }
+
+    def calc_stats(self, eq, initial_capital):
+        mm_eq = eq.ffill()
+        mm_netprofit = mm_eq[-1]
+        mm_atr_series = atr_nonull(mm_eq, mm_eq, mm_eq, self._cmp_dict['campaign_risk_period'])
+        mm_max_dd_series = mm_eq - mm_eq.expanding().max()
+        mm_max_dd_percent_series = (mm_max_dd_series / mm_eq.expanding().max())  * 100
+        return {
+            'net_profit_usd': mm_netprofit - initial_capital,
+            'net_profit_pct': (mm_netprofit - initial_capital) / initial_capital * 100,
+
+            'mdd_usd': mm_max_dd_series.min(),
+            'mdd_pct': mm_max_dd_percent_series.min(),
+
+            'mdd_usd_series': mm_max_dd_series,
+            'mdd_pct_series': mm_max_dd_percent_series,
+
+            'atr_max_usd': mm_atr_series.max(),
+            'atr_q95_usd': mm_atr_series.dropna().quantile(0.95),
+            'atr_avg_usd': mm_atr_series.mean(),
+
+            'atr_max_pct': (mm_atr_series / mm_eq).max() * 100,
+            'atr_q95_pct': (mm_atr_series / mm_eq).dropna().quantile(0.95) * 100,
+            'atr_avg_pct': (mm_atr_series / mm_eq).mean() * 100,
+        }
+
+    def report_money_management(self, bt_stats_dict, alt_dollar_costs=None, performance_fee=0.2, fixed_mgmt_fee=0.02, plot_graph=False):
+            eq = bt_stats_dict['equity_mm'].fillna(0.0)
+            costs_sum = bt_stats_dict['alphas_costs_mm'].sum(axis=1).cumsum()
+            equity_without_costs = (eq - costs_sum)
+
+            #
+            # Calculating equity with new costs
+            #
+            ncontracts_traded = bt_stats_dict['alphas_contracts_mm'].sum(axis=1)
+            new_costs = ncontracts_traded * -abs(alt_dollar_costs if alt_dollar_costs is not None else self.default_commission_per_contr)
+            new_equity = equity_without_costs + new_costs.cumsum() + bt_stats_dict['initial_capital']
+
+            #
+            # Calculation of the performance fees (with high-water mark)
+            #
+            monthly_eq = new_equity.resample('M').last()
+            monthly_high_watermark = monthly_eq.expanding().max().shift()
+
+            # Skip periods when equity closed lower than previous month's high-water mark
+            performance_fee_base = monthly_eq - monthly_high_watermark
+            performance_fee_base[performance_fee_base <= 0] = 0
+            performance_fee = performance_fee_base * -abs(performance_fee)
+
+            management_fee = pd.Series(-abs(fixed_mgmt_fee), index=performance_fee.index)
+
+            performance_fees_sum = performance_fee.cumsum().reindex(eq.index, method='ffill')
+            management_fee_sum = management_fee.cumsum().reindex(eq.index, method='ffill')
+            performance_fee_equity = new_equity + performance_fees_sum.fillna(0.0) + management_fee_sum.fillna(0.0)
+
+            df_result = pd.DataFrame({
+                "equity_original": eq + bt_stats_dict['initial_capital'],
+                "equity_with_costs": new_equity,
+                "equity_all_included": performance_fee_equity,
+                "costs_sum": new_costs.cumsum(),
+                'performance_fee_sum': performance_fees_sum,
+                'management_fee_sum': management_fee_sum,
+                'ncontracts_traded': ncontracts_traded,
+                'costs': new_costs,
+            })
+
+            if plot_graph:
+                df_result[["equity_original", "equity_with_costs", "equity_all_included"]].plot()
+
+                plt.figure()
+                df_result[["costs_sum", 'performance_fee_sum', 'management_fee_sum']].plot()
+            return df_result
+
+    def report_execution_info(self, bt_stats_dict):
+        """
+        Generate information for execution (deltas, costs, contracts executed, etc)
+        :param bt_stats_dict:
+        :return:
+        """
+
+        products_list = set(self.alphas_products.values())
+
+        #
+        # Deltas by product
+        #
+        _deltas = bt_stats_dict['alphas_deltas_mm']
+        _deltas_df = pd.DataFrame(0, index=_deltas.index, columns=products_list)
+
+        for alpha_name in _deltas.columns:
+            _prod = self.alphas_products[alpha_name]
+            _deltas_df[_prod] += _deltas[alpha_name]
+
+        plt.figure();
+        _deltas_df.plot();
+        plt.legend(loc=2);
+        plt.title("Deltas by product");
+
+        #
+        # Costs by product
+        #
+        _costs = bt_stats_dict['alphas_costs_mm']
+        _costs_df = pd.DataFrame(0, index=_costs.index, columns=products_list)
+
+        for alpha_name in _costs.columns:
+            _prod = self.alphas_products[alpha_name]
+            _costs_df[_prod] += _costs[alpha_name]
+
+        plt.figure();
+        _costs_df.plot();
+        plt.legend(loc=2);
+        plt.title("Costs by product");
+
+        #
+        # Contracts executed
+        #
+        _ncontracts = bt_stats_dict['alphas_contracts_mm']
+        _ncontracts_df = pd.DataFrame(0, index=_ncontracts.index, columns=products_list)
+
+        for alpha_name in _ncontracts.columns:
+            _prod = self.alphas_products[alpha_name]
+            _ncontracts_df[_prod] += _ncontracts[alpha_name]
+
+        plt.figure();
+        _ncontracts_df.plot();
+        plt.legend(loc=2);
+        plt.title("Number contracts executed by product");
+
+
+
+
 
     def report(self, bt_stats_dict):
         """
@@ -428,31 +645,9 @@ class SmartCampaignBase:
         :return:
         """
 
-        import matplotlib.pyplot as plt
+
 
         initial_capital = bt_stats_dict['initial_capital']
-
-        def calc_stats(eq):
-            mm_eq = eq.ffill()
-            mm_netprofit = mm_eq[-1]
-            mm_atr_series = atr_nonull(mm_eq, mm_eq, mm_eq, self._cmp_dict['campaign_risk_period'])
-            mm_max_dd_series = mm_eq - mm_eq.expanding().max()
-
-            return {
-                'net_profit_usd': mm_netprofit - initial_capital,
-                'net_profit_pct': (mm_netprofit - initial_capital) / initial_capital * 100,
-
-                'mdd_usd': mm_max_dd_series.min(),
-                'mdd_pct': (mm_max_dd_series / mm_eq.expanding().max()).min() * 100,
-
-                'atr_max_usd': mm_atr_series.max(),
-                'atr_q95_usd': mm_atr_series.dropna().quantile(0.95),
-                'atr_avg_usd': mm_atr_series.mean(),
-
-                'atr_max_pct': (mm_atr_series/mm_eq).max()*100,
-                'atr_q95_pct': (mm_atr_series/mm_eq).dropna().quantile(0.95)*100,
-                'atr_avg_pct': (mm_atr_series/mm_eq).mean()*100,
-            }
 
         def print_multi(field_name, key, dict_list, _format="{0:>10}"):
             pattern = "{0:<30}"
@@ -467,12 +662,12 @@ class SmartCampaignBase:
 
             print(pattern.format(field_name, *values))
 
-        mm_stats = calc_stats(bt_stats_dict['equity_mm'])
-        plain_adj_stats = calc_stats(bt_stats_dict['equity_plain_adj'])
-        plain_adj_noreinv = calc_stats(bt_stats_dict['equity_plain_adj_noreinv'])
-        simple_sum = calc_stats(bt_stats_dict['equity_simple_sum'])
+        stats_mm = self.calc_stats(bt_stats_dict['equity_mm'], initial_capital)
+        stats_plain_adj = self.calc_stats(bt_stats_dict['equity_plain_adj'], initial_capital)
+        stats_plain_adj_noreinv = self.calc_stats(bt_stats_dict['equity_plain_adj_noreinv'], initial_capital)
+        stats_simple_sum = self.calc_stats(bt_stats_dict['equity_simple_sum'], initial_capital)
 
-        eq_list = [mm_stats, plain_adj_stats, plain_adj_noreinv, simple_sum]
+        eq_list = [stats_mm, stats_plain_adj, stats_plain_adj_noreinv, stats_simple_sum]
 
         print_multi('', None, ['   MM', '   Adj Plain', "   Adj No Reinv", "   Simple Sum"], _format="{0:<15}")
 
@@ -511,6 +706,16 @@ class SmartCampaignBase:
 
         plt.legend(loc=2);
         plt.title("Equities");
+
+        # Max DD Series
+        plt.figure();
+        stats_mm['mdd_pct_series'].plot(label="MaxDD % MM")
+        stats_plain_adj['mdd_pct_series'].plot(label="MaxDD % Adj Plain")
+        stats_plain_adj_noreinv['mdd_pct_series'].plot(label="MaxDD % Adj No Reinv")
+        stats_simple_sum['mdd_pct_series'].plot(label="MaxDD % Simple Sum")
+
+        plt.legend(loc=2);
+        plt.title("Max DD percent");
 
         # Alpha equities
         plt.figure();
@@ -554,6 +759,10 @@ class SmartCampaignBase:
         bt_stats_dict['campaign_estimated_base_risk_plain'].plot(label='Risk Plain');
         plt.legend(loc=2);
         plt.title("Campaign estimated base risk");
+
+        plt.figure();
+        bt_stats_dict['alphas_costs_mm'].sum(axis=1).cumsum().plot();
+        plt.title("Cumulative costs for all alphas (MM)");
 
     def save(self, mongo_collection):
         self._cmp_dict['class'] = object_to_full_path(self)

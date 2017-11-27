@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
-import pyximport; pyximport.install()
+
+import pyximport;
+pyximport.install(setup_args={"include_dirs": np.get_include()})
 from smartcampaign.tools_fast import atr_nonull_eqty
 
 
