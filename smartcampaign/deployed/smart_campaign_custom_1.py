@@ -15,24 +15,46 @@ class SmartCampaignCustom_1(SmartCampaignBase):
         # Use default method of SmartCampaignBase.calc_alpha_risk()
         return super().calc_alpha_risk(alpha_equity)
 
-    def calc_rel_str(self, df_adj_alpha_equity, group_name, relstr_mean_per):
+    def calc_rel_str(self, df_adj_alpha_equity, group_name=None):
+        """
+        Calculates relative strength index.
+
+        Algo steps:
+        1. Calculate equity index mean of all alphas
+        2. Calculate rel str for each alpha: [each alpha] / [equity index]
+        3. Calculate the difference of each rel str in 'relstr_mean_per' window
+        4. Smooth the #3 using moving average with 'relstr_diff_avg_window' window
+        5. Sort values and apply decile weights
+
+        """
+        relstr_diff_avg_window = self._cmp_dict['relstr_diff_avg_window']
+        relstr_mean_per = self._cmp_dict['relstr_mean_period']
         result_dict = {}
 
         if group_name in self.tags:
 
-            eq_long = df_adj_alpha_equity[self.tags[group_name]].ffill()
+            if group_name == '' or group_name is None:
+                eq_long = df_adj_alpha_equity.ffill()
+            else:
+                eq_long = df_adj_alpha_equity[self.tags[group_name]].ffill()
 
             if len(eq_long):
                 # Calculate all equities index
-                eq_chg = eq_long.diff(relstr_mean_per)
-                eq_mean = eq_chg.mean(axis=1)
+                eq_mean_idx = eq_long.mean(axis=1)
+                rel_str_diff = (eq_long.div(eq_mean_idx, axis=0)).diff(relstr_mean_per).rolling(
+                    relstr_diff_avg_window).mean()
+
+                sorted_alphas_rstr = rel_str_diff.iloc[-1].sort_values()
 
                 # Select alphas which are relatively greater than average
-                for alpha_name in eq_chg:
-                    if eq_chg[alpha_name][-1] >= eq_mean[-1]:
-                        result_dict[alpha_name] = 0.2
-                    else:
-                        result_dict[alpha_name] = 0.7
+                q_weights = self._cmp_dict['relstr_quantiles_weights']
+
+                for i, (alpha_name, rstr_value) in enumerate(sorted_alphas_rstr.items()):
+                    #
+                    for q, w in q_weights:
+                        if i <= int(q * len(sorted_alphas_rstr)):
+                            result_dict[alpha_name] = w
+                            break
 
         return result_dict
 
@@ -46,45 +68,41 @@ class SmartCampaignCustom_1(SmartCampaignBase):
         result_dict = {}
 
         # Calculating relative strength to average LONG-tagged set of equities
-        relstr_mean_per = self._cmp_dict['relstr_mean_period']
 
-        #         result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'long', relstr_mean_per))
-        #         result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'short', relstr_mean_per))
 
-        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'ZS_groupN1', relstr_mean_per))
 
-        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'ZW_groupN1', relstr_mean_per))
-        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'ZW_groupN2', relstr_mean_per))
 
-        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'CL_groupN1', relstr_mean_per))
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'ZS_groupN1'))
 
-        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'ES_groupN1', relstr_mean_per))
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'ZW_groupN1'))
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'ZW_groupN2'))
 
-        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, '6J_groupN1', relstr_mean_per))
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'CL_groupN1'))
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'CL_groupN1'))
 
-        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'ZN_groupN1', relstr_mean_per))
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'ES_groupN1'))
 
-        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, '6B_groupN1', relstr_mean_per))
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, '6J_groupN1'))
 
-        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, '6C_groupN1', relstr_mean_per))
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'ZN_groupN1'))
 
-        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, '6E_groupN1', relstr_mean_per))
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, '6B_groupN1'))
 
-        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'HE_groupN1', relstr_mean_per))
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, '6C_groupN1'))
 
-        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'GC_groupN1', relstr_mean_per))
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, '6E_groupN1'))
 
-        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'LE_groupN1', relstr_mean_per))
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'HE_groupN1'))
 
-        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'NG_groupN1', relstr_mean_per))
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'GC_groupN1'))
 
-        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'ZC_groupN1', relstr_mean_per))
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'LE_groupN1'))
 
-        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'ZL_groupN1', relstr_mean_per))
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'NG_groupN1'))
 
-        #         result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'groupN1', relstr_mean_per))
-        #         result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'groupN2', relstr_mean_per))
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'ZC_groupN1'))
 
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'ZL_groupN1'))
 
         return result_dict
 
