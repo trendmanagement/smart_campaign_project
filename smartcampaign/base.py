@@ -72,7 +72,8 @@ class SmartCampaignBase:
 
         if self.equities.tail(n_last).isnull().sum().sum() > 0:
             warnings.warn("Alphas of the campaign are not properly aligned, data holes or inconsistent index detected!")
-            print(self.equities.tail(n_last)[not_aligned.index[not_aligned]].T)
+            for alpha_name in self.equities.tail(n_last)[not_aligned.index[not_aligned]]:
+                print("[Not Aligned] {0}".format(alpha_name))
 
         print("Last equity date: {0}".format(self.equities.index[-1]))
 
