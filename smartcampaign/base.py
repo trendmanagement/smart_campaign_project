@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from pydoc import locate
 import pickle
 import lz4
+from datetime import datetime
 
 
 def object_to_full_path(obj) -> str:
@@ -62,6 +63,18 @@ class SmartCampaignBase:
 
         # Convert stacked alphas to single equity series
         self.equities, self.costs, self.exposures, self.deltas, self.ncontracts, self.tags = self._init_dataframes()
+
+        self.check_swarms_integrity()
+
+    def check_swarms_integrity(self):
+        n_last = 10
+        not_aligned = self.equities.tail(n_last).isnull().any(axis=0)
+
+        if self.equities.tail(n_last).isnull().sum().sum() > 0:
+            warnings.warn("Alphas of the campaign are not properly aligned, data holes or inconsistent index detected!")
+            print(self.equities.tail(n_last)[not_aligned.index[not_aligned]].T)
+
+        print("Last equity date: {0}".format(self.equities.index[-1]))
 
 
     @staticmethod
