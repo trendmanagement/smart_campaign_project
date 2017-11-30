@@ -78,7 +78,7 @@ class SmartCampaignCustom_1(SmartCampaignBase):
         result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'ZW_groupN2'))
 
         result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'CL_groupN1'))
-        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'CL_groupN1'))
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'CL_groupN2'))
 
         result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'ES_groupN1'))
 
