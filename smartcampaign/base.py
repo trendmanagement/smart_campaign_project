@@ -827,7 +827,7 @@ class SmartCampaignBase:
             'name': self.name,
             'description': self.description,
             'type': 'smart',
-            'alphas': {k: {'qty': v} for k, v in alpha_total_weights.items()},
+            'alphas': v1_alphas_dict,
             'campaign_risk': cmp_risk,
         }
 
