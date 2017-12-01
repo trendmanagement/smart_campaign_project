@@ -818,7 +818,7 @@ class SmartCampaignBase:
             if 'alphas' in self._cmp_dict['alphas'][alpha_name]:
                 # We have stacked alphas
                 for stacked_alpha, stacked_w in self._cmp_dict['alphas'][alpha_name]['alphas'].items():
-                    v1_alphas_dict[stacked_alpha] = stacked_w * alpha_w
+                    v1_alphas_dict[stacked_alpha] = {'qty': stacked_w * alpha_w}
             else:
                 v1_alphas_dict[alpha_name] = {'qty': alpha_w}
 
