@@ -798,7 +798,7 @@ class SmartCampaignBase:
         # Loading V1 and V2 alphas
         alphas_list = SmartCampaignBase.get_alphas_list_from_settings(smart_dict)
         alphas_series_dict = exo_storage.swarms_data(alphas_list, load_v2_alphas=True)
-        df_alphas_equities = pd.DataFrame({k: v['swarm_series']['equity'] for k, v in alphas_series_dict.items()})
+        df_alphas_equities = {k: v['swarm_series'] for k, v in alphas_series_dict.items()}
 
         return SmartCampaignClass(smart_dict, df_alphas_equities)
 
@@ -811,6 +811,17 @@ class SmartCampaignBase:
         alpha_adj_weights, alpha_cmp_weights, cmp_risk = self.calculate(date=None)
 
         alpha_total_weights = alpha_adj_weights * alpha_cmp_weights
+
+        v1_alphas_dict = {}
+
+        for alpha_name, alpha_w in alpha_total_weights.items():
+            if 'alphas' in self._cmp_dict[alpha_name]:
+                # We have stacked alphas
+                for stacked_alpha, stacked_w in self._cmp_dict[alpha_name]['alphas'].items():
+                    v1_alphas_dict[stacked_alpha] = stacked_w * alpha_w
+            else:
+                v1_alphas_dict[alpha_name] = {'qty': alpha_w}
+
 
         campaign_dict = {
             'name': self.name,
