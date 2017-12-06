@@ -73,7 +73,8 @@ class SmartCampaignBase:
         if self.equities.tail(n_last).isnull().sum().sum() > 0:
             warnings.warn("Alphas of the campaign are not properly aligned, data holes or inconsistent index detected!")
             for alpha_name in self.equities.tail(n_last)[not_aligned.index[not_aligned]]:
-                print("[Not Aligned] {0}".format(alpha_name))
+                eq2 = self.equities[alpha_name]
+                print("[Not Aligned] [{1}] {0}".format(alpha_name, eq2[pd.isnull(eq2)].index[-1].date()))
 
         print("Last equity date: {0}".format(self.equities.index[-1]))
 
@@ -798,7 +799,7 @@ class SmartCampaignBase:
         # Loading V1 and V2 alphas
         alphas_list = SmartCampaignBase.get_alphas_list_from_settings(smart_dict)
         alphas_series_dict = exo_storage.swarms_data(alphas_list, load_v2_alphas=True)
-        df_alphas_equities = pd.DataFrame({k: v['swarm_series']['equity'] for k, v in alphas_series_dict.items()})
+        df_alphas_equities = {k: v['swarm_series'] for k, v in alphas_series_dict.items()}
 
         return SmartCampaignClass(smart_dict, df_alphas_equities)
 
@@ -812,11 +813,22 @@ class SmartCampaignBase:
 
         alpha_total_weights = alpha_adj_weights * alpha_cmp_weights
 
+        v1_alphas_dict = {}
+
+        for alpha_name, alpha_w in alpha_total_weights.items():
+            if 'alphas' in self._cmp_dict['alphas'][alpha_name]:
+                # We have stacked alphas
+                for stacked_alpha, stacked_w in self._cmp_dict['alphas'][alpha_name]['alphas'].items():
+                    v1_alphas_dict[stacked_alpha] = {'qty': stacked_w * alpha_w}
+            else:
+                v1_alphas_dict[alpha_name] = {'qty': alpha_w}
+
+
         campaign_dict = {
             'name': self.name,
             'description': self.description,
             'type': 'smart',
-            'alphas': {k: {'qty': v} for k, v in alpha_total_weights.items()},
+            'alphas': v1_alphas_dict,
             'campaign_risk': cmp_risk,
         }
 
