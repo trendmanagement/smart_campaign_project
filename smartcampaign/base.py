@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from pydoc import locate
 import pickle
 import lz4
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 def object_to_full_path(obj) -> str:
@@ -304,6 +304,23 @@ class SmartCampaignBase:
         assert campaign_min_risk > 0, "campaign_min_risk must be > 0, got {0}".format(campaign_min_risk)
 
         return max(cmp_risk, campaign_min_risk)
+    
+    @staticmethod
+    def get_last_sunday(date=None):
+        """
+        Return date of previous Sunday
+        :param date: if None use datetime.now()
+        :return: 
+        """
+        if date is None:
+            d = datetime.now()
+        else:
+            d = date
+            
+        while d.weekday() != 6:
+            d -= timedelta(days=1)
+            
+        return d            
 
     def calculate(self, date=None, use_plain_campaign_weights=False):
         """
@@ -313,11 +330,8 @@ class SmartCampaignBase:
         """
 
         # Slice alphas
-        if date is None:
-            # No slicing, use all available data
-            alphas_eq = self.equities.ffill()
-        else:
-            alphas_eq = self.equities.ffill().loc[:date]
+        # ALWAYS: get equity before previous Sunday
+        alphas_eq = self.equities.ffill().loc[:self.get_last_sunday(date)]
 
 
         # Calculate every single alpha risks
@@ -480,9 +494,9 @@ class SmartCampaignBase:
             if dt.dayofweek < 2 and prev_date.dayofweek >= 3:
                 # We have new week !
                 # 1. Run self.calculate(date=Sunday)
-                alpha_adj_weights, alpha_cmp_weights, cmp_risk = self.calculate(date=prev_date)
+                alpha_adj_weights, alpha_cmp_weights, cmp_risk = self.calculate(date=dt)
                 # And calculate plain weights for comparison
-                plain_alpha_adj_weights, plain_alpha_cmp_weights, plain_cmp_risk = self.calculate(date=prev_date,
+                plain_alpha_adj_weights, plain_alpha_cmp_weights, plain_cmp_risk = self.calculate(date=dt,
                                                                                                   use_plain_campaign_weights=True)
 
                 # 2. Apply new alpha weights and campaign risk value
@@ -803,13 +817,13 @@ class SmartCampaignBase:
 
         return SmartCampaignClass(smart_dict, df_alphas_equities)
 
-    def export_to_v1_campaign(self):
+    def export_to_v1_campaign(self, pos_date=None):
         """
         Exports to v1 campaign settings
         :return:
         """
 
-        alpha_adj_weights, alpha_cmp_weights, cmp_risk = self.calculate(date=None)
+        alpha_adj_weights, alpha_cmp_weights, cmp_risk = self.calculate(date=pos_date)
 
         alpha_total_weights = alpha_adj_weights * alpha_cmp_weights
 
