@@ -109,6 +109,16 @@ class SmartCampaignCustom_1(SmartCampaignBase):
         result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'SB_groupN1'))
 
         result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'groupN'))
+        
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'SB_groupN1'))
+        
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'SI_groupN1'))
+       
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'HG_groupN1'))
+        
+        result_dict.update(self.calc_rel_str(df_adj_alpha_equity, 'HO_groupN1')) 
+        
+        
 
         return result_dict
 
